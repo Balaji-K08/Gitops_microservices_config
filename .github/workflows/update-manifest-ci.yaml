@@ -23,6 +23,13 @@ jobs:
       - name: Checkout config repository
         uses: actions/checkout@v4
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+
       - name: Validate services and verify images
         id: validate
         env:
@@ -136,11 +143,12 @@ jobs:
             fi
 
             # Check manifest exists
-            MANIFEST="k8s-manifest/${service}.yaml"
+            MANIFEST="k8s-manifests/${service}.yaml"
 
             if [[ ! -f "$MANIFEST" ]]; then
               echo "::error title=Missing manifest::Manifest '$MANIFEST' does not exist."
               SERVICE_VALID=false
+              exit 1
             else
               echo "✓ Manifest exists: $MANIFEST"
             fi
@@ -154,6 +162,7 @@ jobs:
             if ! docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
               echo "::error title=Image not found::Docker image '$IMAGE' was not found."
               SERVICE_VALID=false
+              exit 1
             else
               echo "✓ Docker image exists"
             fi
