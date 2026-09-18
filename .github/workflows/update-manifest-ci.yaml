@@ -102,13 +102,13 @@ jobs:
             "currencyservice"
             "emailservice"
             "frontend"
+            "loadgenerator"
             "paymentservice"
             "productcatalogservice"
             "recommendationservice"
             "shippingservice"
-            "shoppingassistantservice"
           )
-
+          #             "shoppingassistantservice"
           # Array containing only services that pass validation.
           VALID_SERVICES=()
 
