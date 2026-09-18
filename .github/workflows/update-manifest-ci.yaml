@@ -1,0 +1,339 @@
+name: Update Kubernetes Images
+
+on:
+  repository_dispatch:
+    types: [images-built]
+
+permissions:
+  contents: write
+  # metadata: read only
+  pull-requests: write
+
+jobs:
+
+  validate-and-verify:
+    name: Validate and verify images
+    runs-on: ubuntu-latest
+
+    outputs:
+      valid_services: ${{ steps.validate.outputs.valid_services }}
+
+    steps:
+
+      - name: Checkout config repository
+        uses: actions/checkout@v4
+
+      - name: Validate services and verify images
+        id: validate
+        env:
+          SERVICES: ${{ toJSON(github.event.client_payload.services) }}
+          SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -uo pipefail
+
+          DOCKER_REPO="balajik08/gitops_project1" #DOCKER REPO
+
+          echo "========================================"
+          echo "Image Update Validation"
+          echo "========================================"
+
+          echo "Received SHA:"
+          echo "$SHA"
+          echo
+
+          echo "Received services:"
+          echo "$SERVICES"
+          echo
+
+          # --------------------------------------------------
+          # Validate SHA
+          # --------------------------------------------------
+
+          if [[ -z "$SHA" ]]; then
+            echo "::error::Commit SHA is empty."
+            # echo "valid_services=[]" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          if [[ ! "$SHA" =~ ^[a-fA-F0-9]{40}$ ]]; then
+            echo "::error::Invalid commit SHA: $SHA"
+            # echo "valid_services=[]" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "✓ Commit SHA is valid"
+          echo
+
+          # --------------------------------------------------
+          # Validate services array
+          # --------------------------------------------------
+
+          if [[ -z "$SERVICES" || "$SERVICES" == "null" ]]; then
+            echo "::error::Services array is empty."
+            # echo "valid_services=[]" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          SERVICE_COUNT=$(echo "$SERVICES" | jq 'length')
+
+          if [[ "$SERVICE_COUNT" -eq 0 ]]; then
+            echo "::error::Services array contains no services."
+            # echo "valid_services=[]" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          echo "✓ Received $SERVICE_COUNT service(s)"
+          echo
+
+          # --------------------------------------------------
+          # Allowed services
+          # --------------------------------------------------
+
+          ALLOWED_SERVICES=(
+            "adservice"
+            "cartservice"
+            "checkoutservice"
+            "currencyservice"
+            "emailservice"
+            "frontend"
+            "paymentservice"
+            "productcatalogservice"
+            "recommendationservice"
+            "shippingservice"
+            "shoppingassistantservice"
+          )
+
+          # Array containing only services that pass validation.
+          VALID_SERVICES=()
+
+          # --------------------------------------------------
+          # Validate every service independently
+          # --------------------------------------------------
+
+          for service in $(echo "$SERVICES" | jq -r '.[]'); do
+
+            echo "----------------------------------------"
+            echo "Checking service: $service"
+            echo "----------------------------------------"
+
+            SERVICE_VALID=true
+
+            # Check service is allowed
+            ALLOWED=false
+
+            for allowed_service in "${ALLOWED_SERVICES[@]}"; do
+              if [[ "$service" == "$allowed_service" ]]; then
+                ALLOWED=true
+                break
+              fi
+            done
+
+            if [[ "$ALLOWED" != "true" ]]; then
+              echo "::error title=Invalid service::Service '$service' is not in the allowed services list."
+              SERVICE_VALID=false
+            else
+              echo "✓ Service is allowed"
+            fi
+
+            # Check manifest exists
+            MANIFEST="k8s-manifest/${service}.yaml"
+
+            if [[ ! -f "$MANIFEST" ]]; then
+              echo "::error title=Missing manifest::Manifest '$MANIFEST' does not exist."
+              SERVICE_VALID=false
+            else
+              echo "✓ Manifest exists: $MANIFEST"
+            fi
+
+            # Check Docker image
+            IMAGE="${DOCKER_REPO}:${service}-${SHA}"
+
+            echo "Checking image:"
+            echo "$IMAGE"
+
+            if ! docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
+              echo "::error title=Image not found::Docker image '$IMAGE' was not found."
+              SERVICE_VALID=false
+            else
+              echo "✓ Docker image exists"
+            fi
+
+            # ------------------------------------------------
+            # Service result
+            # ------------------------------------------------
+
+            if [[ "$SERVICE_VALID" == "true" ]]; then
+              echo "✓ $service PASSED validation"
+              VALID_SERVICES+=("$service")
+            else
+              echo "✗ $service FAILED validation"
+              echo "  → This service will NOT be updated."
+            fi
+
+            echo
+          done
+
+          # --------------------------------------------------
+          # Create JSON array for next job
+          # --------------------------------------------------
+
+          if [[ ${#VALID_SERVICES[@]} -eq 0 ]]; then
+            VALID_JSON="[]"
+          else
+            VALID_JSON=$(printf '%s\n' "${VALID_SERVICES[@]}" | jq -R . | jq -s -c .)
+          fi
+
+          echo "========================================"
+          echo "Validation Summary"
+          echo "========================================"
+
+          echo "Valid services:"
+          echo "$VALID_JSON"
+          echo
+
+          echo "valid_services=$VALID_JSON" >> "$GITHUB_OUTPUT"
+
+          echo "Validation completed."
+          echo "Invalid services were skipped."
+
+
+  update-manifests:
+    name: Update Kubernetes manifests
+    needs: validate-and-verify
+    runs-on: ubuntu-latest
+
+    # Skip this job only when no service passed validation.
+    if: ${{ needs.validate-and-verify.outputs.valid_services != '[]' }}
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout config repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Update image tags
+        env:
+          SERVICES: ${{ needs.validate-and-verify.outputs.valid_services }}
+          SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -uo pipefail
+
+          DOCKER_REPO="balajik08/gitops_project1" #DOCKER REPO
+
+          echo "========================================"
+          echo "Updating Kubernetes manifests"
+          echo "========================================"
+          echo "Commit SHA: $SHA"
+          echo "Valid services: $SERVICES"
+          echo
+
+          UPDATED=()
+          FAILED=()
+
+          for service in $(echo "$SERVICES" | jq -r '.[]'); do
+
+            MANIFEST="k8s-manifest/${service}.yaml"
+            IMAGE="${DOCKER_REPO}:${service}-${SHA}"
+
+            echo "----------------------------------------"
+            echo "Service : $service"
+            echo "Manifest: $MANIFEST"
+            echo "Image   : $IMAGE"
+            echo "----------------------------------------"
+
+            # Extra safety check.
+            if [[ ! -f "$MANIFEST" ]]; then
+              echo "::error title=Manifest missing::${MANIFEST} does not exist."
+              FAILED+=("$service")
+              continue
+            fi
+
+            # Export IMAGE so yq can read it through strenv().
+            export IMAGE
+
+            if yq -i '
+              select(.kind == "Deployment")
+              | (.spec.template.spec.containers[] | select(.name == "server").image) = strenv(IMAGE)
+            ' "$MANIFEST"; then
+
+              echo "✓ Successfully updated $service"
+              UPDATED+=("$service")
+
+            else
+
+              echo "::error title=Manifest update failed::Failed to update ${service}"
+              FAILED+=("$service")
+
+            fi
+
+            echo
+          done
+
+          echo "========================================"
+          echo "Update Summary"
+          echo "========================================"
+
+          echo "Updated services:"
+          if [[ ${#UPDATED[@]} -gt 0 ]]; then
+            printf '  ✓ %s\n' "${UPDATED[@]}"
+          else
+            echo "  None"
+          fi
+
+          echo
+
+          echo "Failed services:"
+          if [[ ${#FAILED[@]} -gt 0 ]]; then
+            printf '  ✗ %s\n' "${FAILED[@]}"
+          else
+            echo "  None"
+          fi
+
+          echo
+
+      - name: Show manifest changes
+        run: |
+          echo "========================================"
+          echo "Git diff"
+          echo "========================================"
+
+          git diff -- k8s-manifest/
+
+      - name: Commit and push changes
+        env:
+          SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add k8s-manifest/
+
+          if git diff --cached --quiet; then
+            echo "No manifest changes detected."
+            exit 0
+          fi
+
+          git commit -m "chore: update images to ${SHA}"
+
+          git push origin HEAD:main
+
+
+
+
+
+
+
+
+
+   
