@@ -161,7 +161,6 @@ jobs:
             if ! docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
               echo "::error title=Image not found::Docker image '$IMAGE' was not found."
               SERVICE_VALID=false
-              # exit 1
             else
               echo "✓ Docker image exists"
             fi
