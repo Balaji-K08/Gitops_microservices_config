@@ -85,6 +85,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: cartservice
+imagePullSecrets:
+  - name: dockerhub-creds
 ---
 apiVersion: apps/v1
 kind: Deployment
