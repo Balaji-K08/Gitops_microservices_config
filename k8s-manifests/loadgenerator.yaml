@@ -77,7 +77,7 @@ spec:
                 - ALL
             privileged: false
             readOnlyRootFilesystem: true
-          image: loadgenerator
+          image: balajik08/gitops_project1:loadgenerator-bf419f8cf5cc89a95ee990f3f3b3eeb66eb0f9f2
           env:
             - name: FRONTEND_ADDR
               value: "frontend:80"
