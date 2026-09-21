@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: microservices
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/Balaji-K08/Gitops_microservices_config.git
+        revision: main
+        files:
+          - path: k8s-manifests/*.yaml
+
+  template:
+    metadata:
+      name: '{{path.filename}}'
+    spec:
+      project: microservices
+
+      source:
+        repoURL: https://github.com/Balaji-K08/Gitops_microservices_config.git
+        targetRevision: main
+        path: k8s-manifests
+        directory:
+          include: '{{path.filename}}'
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: services
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true

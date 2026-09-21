@@ -34,33 +34,53 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
       containers:
-        - name: server
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-            privileged: false
-            readOnlyRootFilesystem: true
-          image: balajik08/gitops_project1:shippingservice-2c5fd9db2065390577170ab41b17f0ec6ed50340
-          ports:
-            - containerPort: 50051
-          env:
-            - name: PORT
-              value: "50051"
-            - name: DISABLE_PROFILER
-              value: "1"
-          readinessProbe:
-            periodSeconds: 5
-            grpc:
-              port: 50051
-          livenessProbe:
-            grpc:
-              port: 50051
-          resources:
-            requests:
-              cpu: 100m
-              memory: 64Mi
-            limits:
-              cpu: 200m
-              memory: 128Mi
+      - name: server
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          readOnlyRootFilesystem: true
+        image: shippingservice
+        ports:
+        - containerPort: 50051
+        env:
+        - name: PORT
+          value: "50051"
+        - name: DISABLE_PROFILER
+          value: "1"
+        readinessProbe:
+          periodSeconds: 5
+          grpc:
+            port: 50051
+        livenessProbe:
+          grpc:
+            port: 50051
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shippingservice
+  labels:
+    app: shippingservice
+spec:
+  type: ClusterIP
+  selector:
+    app: shippingservice
+  ports:
+  - name: grpc
+    port: 50051
+    targetPort: 50051
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shippingservice

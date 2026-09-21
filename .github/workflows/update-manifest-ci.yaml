@@ -268,8 +268,8 @@ jobs:
             export IMAGE
 
             if yq -i '
-              select(.kind == "Deployment")
-              | (.spec.template.spec.containers[] | select(.name == "server").image) = strenv(IMAGE)
+            (select(.kind == "Deployment").spec.template.spec.containers[]
+            | select(.name == "server") | .image) = strenv(IMAGE)
             ' "$MANIFEST"; then
 
               echo "✓ Successfully updated $service"
